@@ -15,8 +15,8 @@ import (
 )
 
 // Resolve function to bypass ouo.io and ouo.press links
-func resolve(ouoURL string) (string, error) {
-	bypassed, err := ouoBypass(ouoURL)
+func Resolve(ouoURL string) (string, error) {
+	bypassed, err := OuoBypass(ouoURL)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return "", err
@@ -24,7 +24,8 @@ func resolve(ouoURL string) (string, error) {
 	return bypassed, nil
 }
 
-func ouoBypass(ouoURL string) (string, error) {
+// OuoBypass function to bypass ouo.io and ouo.press links
+func OuoBypass(ouoURL string) (string, error) {
 	tempURL := strings.Replace(ouoURL, "ouo.press", "ouo.io", 1)
 	var location string
 	u, err := url.Parse(tempURL)
@@ -91,6 +92,7 @@ func ouoBypass(ouoURL string) (string, error) {
 	return location, nil
 }
 
+// RecaptchaV3 function to bypass reCAPTCHA v3
 func RecaptchaV3() (string, error) {
 	AnchorUrl := "https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x&co=aHR0cHM6Ly9vdW8ucHJlc3M6NDQz&hl=en&v=pCoGBhjs9s8EhFOHJFe8cqis&size=invisible&cb=ahgyd1gkfkhe"
 	urlBase := "https://www.google.com/recaptcha/"
