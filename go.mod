@@ -1,4 +1,4 @@
-module ouo-bypass-go
+module github.com/love98ooo/ouo-bypass-go
 
 go 1.20
 
