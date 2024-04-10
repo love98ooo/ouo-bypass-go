@@ -8,6 +8,7 @@ import (
 	"github.com/gocolly/colly/v2"
 	"github.com/gocolly/colly/v2/extensions"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -18,7 +19,7 @@ import (
 func Resolve(ouoURL string) (string, error) {
 	bypassed, err := OuoBypass(ouoURL)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Default().Println("Resolve ouo short-link Error: ", err)
 		return "", err
 	}
 	return bypassed, nil
@@ -45,35 +46,19 @@ func OuoBypass(ouoURL string) (string, error) {
 	extensions.RandomUserAgent(client)
 	data := make(map[string]string)
 	client.OnResponse(func(r *colly.Response) {
-		fmt.Println("Response received:", r.StatusCode)
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
+		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
 		doc.Find("input").Each(func(i int, s *goquery.Selection) {
 			name, _ := s.Attr("name")
 			if strings.HasSuffix(name, "token") {
 				data[name], _ = s.Attr("value")
 			}
 		})
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			return
-		}
 	})
-	err = client.Visit(tempURL)
-	if err != nil {
-		return "", err
-	}
-	if err != nil {
-		return "", err
-	}
+	_ = client.Visit(tempURL)
 	nextURL := fmt.Sprintf("%s://%s/go/%s", u.Scheme, u.Host, id)
 
 	for i := 0; i < 2; i++ {
-		fmt.Println(nextURL)
-
-		if err != nil {
-			return "", err
-		}
-
+		log.Default().Println("ouo short-link next URL: ", nextURL)
 		recaptchaV3, err := RecaptchaV3()
 		if err != nil {
 			return "", err
@@ -84,9 +69,9 @@ func OuoBypass(ouoURL string) (string, error) {
 		if errors.Is(err, http.ErrUseLastResponse) {
 			return location, nil
 		}
-		client.OnResponse(func(r *colly.Response) {
-			fmt.Println(r.StatusCode)
-		})
+		//client.OnResponse(func(r *colly.Response) {
+		//	fmt.Println(r.StatusCode)
+		//})
 		nextURL = fmt.Sprintf("%s://%s/xreallcygo/%s", u.Scheme, u.Host, id)
 	}
 	return location, nil
