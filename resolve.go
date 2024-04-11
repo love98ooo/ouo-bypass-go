@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Resolve function to bypass ouo.io and ouo.press links
@@ -38,6 +39,14 @@ func OuoBypass(ouoURL string) (string, error) {
 		TLSClientConfig: &tls.Config{},
 	}
 	client := colly.NewCollector()
+	client.OnRequest(func(r *colly.Request) {
+		r.Headers.Set("authority", "ouo.io")
+		r.Headers.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+		r.Headers.Set("accept-language", "en-GB,en-US;q=0.9,en;q=0.8")
+		r.Headers.Set("cache-control", "max-age=0")
+		r.Headers.Set("referer", "http://www.google.com/ig/adde?moduleurl=")
+		r.Headers.Set("upgrade-insecure-requests", "1")
+	})
 	client.WithTransport(ja3Transport)
 	client.SetRedirectHandler(func(req *http.Request, via []*http.Request) error {
 		location = req.URL.String()
@@ -46,6 +55,7 @@ func OuoBypass(ouoURL string) (string, error) {
 	extensions.RandomUserAgent(client)
 	data := make(map[string]string)
 	client.OnResponse(func(r *colly.Response) {
+		log.Default().Println("ouo-bypass-go response code: ", r.StatusCode)
 		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
 		doc.Find("input").Each(func(i int, s *goquery.Selection) {
 			name, _ := s.Attr("name")
@@ -54,10 +64,14 @@ func OuoBypass(ouoURL string) (string, error) {
 			}
 		})
 	})
-	_ = client.Visit(tempURL)
+	err = client.Visit(tempURL)
+	if err != nil {
+		return "", err
+	}
 	nextURL := fmt.Sprintf("%s://%s/go/%s", u.Scheme, u.Host, id)
 
 	for i := 0; i < 2; i++ {
+		time.Sleep(3 * time.Second)
 		log.Default().Println("ouo short-link next URL: ", nextURL)
 		recaptchaV3, err := RecaptchaV3()
 		if err != nil {
@@ -69,9 +83,6 @@ func OuoBypass(ouoURL string) (string, error) {
 		if errors.Is(err, http.ErrUseLastResponse) {
 			return location, nil
 		}
-		//client.OnResponse(func(r *colly.Response) {
-		//	fmt.Println(r.StatusCode)
-		//})
 		nextURL = fmt.Sprintf("%s://%s/xreallcygo/%s", u.Scheme, u.Host, id)
 	}
 	return location, nil
@@ -103,7 +114,7 @@ func RecaptchaV3() (string, error) {
 
 	tokenMatches := regexp.MustCompile(`"recaptcha-token" value="(.*?)"`).FindStringSubmatch(string(body))
 	if len(tokenMatches) < 2 {
-		return "", fmt.Errorf("no token found in response")
+		return "", errors.New("no token found in response")
 	}
 	token := tokenMatches[1]
 	paramsMap := make(map[string]string)
@@ -133,7 +144,7 @@ func RecaptchaV3() (string, error) {
 
 	answerMatches := regexp.MustCompile(`"rresp","(.*?)"`).FindStringSubmatch(string(body))
 	if len(answerMatches) < 2 {
-		return "", fmt.Errorf("no answer found in response")
+		return "", errors.New("no answer found in reCaptcha response")
 	}
 
 	return answerMatches[1], nil
