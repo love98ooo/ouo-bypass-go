@@ -1,18 +1,19 @@
 package ouo_bypass_go
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/gocolly/colly/v2"
-	"github.com/gocolly/colly/v2/extensions"
+	http "github.com/bogdanfinn/fhttp"
+	tlsclient "github.com/bogdanfinn/tls-client"
+	"github.com/bogdanfinn/tls-client/profiles"
 	"io"
 	"log"
-	"net/http"
+	"math/rand"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Resolve function to bypass ouo.io and ouo.press links
@@ -34,44 +35,103 @@ func OuoBypass(ouoURL string) (string, error) {
 		return "", err
 	}
 	id := tempURL[strings.LastIndex(tempURL, "/")+1:]
-	ja3Transport := &http.Transport{
-		TLSClientConfig: &tls.Config{},
+	jar := tlsclient.NewCookieJar()
+	options := []tlsclient.HttpClientOption{
+		tlsclient.WithTimeoutSeconds(30),
+		tlsclient.WithClientProfile(profiles.Chrome_110),
+		tlsclient.WithNotFollowRedirects(),
+		tlsclient.WithCookieJar(jar), // create cookieJar instance and pass it as argument
 	}
-	client := colly.NewCollector()
-	client.WithTransport(ja3Transport)
-	client.SetRedirectHandler(func(req *http.Request, via []*http.Request) error {
-		location = req.URL.String()
-		return http.ErrUseLastResponse
+
+	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
+	if err != nil {
+		return "", err
+	}
+	//client.SetRedirectHandler(func(getReq *http.Request, via []*http.Request) error {
+	//	location = getReq.URL.String()
+	//	return http.ErrUseLastResponse
+	//})
+	//extensions.RandomUserAgent(client)
+	//data := make(map[string]string)
+	//client.OnResponse(func(r *colly.Response) {
+	//	log.Default().Println("ouo-bypass-go response code: ", r.StatusCode)
+	//	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
+	//	doc.Find("input").Each(func(i int, s *goquery.Selection) {
+	//		name, _ := s.Attr("name")
+	//		if strings.HasSuffix(name, "token") {
+	//			data[name], _ = s.Attr("value")
+	//		}
+	//	})
+	//})
+
+	getReq, err := http.NewRequest(http.MethodGet, tempURL, nil)
+	if err != nil {
+		return "", err
+	}
+	chrome110UserAgent := []string{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Mobile Safari/537.36", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"}
+	s := rand.NewSource(time.Now().UnixNano())
+	r := rand.New(s)
+	getReq.Header = http.Header{
+		"accept":          {"*/*"},
+		"accept-language": {"de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
+		"user-agent":      {chrome110UserAgent[r.Intn(len(chrome110UserAgent))]},
+		http.HeaderOrderKey: {
+			"accept",
+			"accept-language",
+			"user-agent",
+		},
+	}
+
+	resp, err := client.Do(getReq)
+	defer resp.Body.Close()
+	if resp.StatusCode == 403 {
+		return "", errors.New("ouo.io is blocking the request")
+	}
+	readBytes, _ := io.ReadAll(resp.Body)
+	data := url.Values{}
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(readBytes)))
+	doc.Find("input").Each(func(i int, s *goquery.Selection) {
+		name, _ := s.Attr("name")
+		if strings.HasSuffix(name, "token") {
+			value, _ := s.Attr("value")
+			data.Add(name, value)
+		}
 	})
-	extensions.RandomUserAgent(client)
-	data := make(map[string]string)
-	client.OnResponse(func(r *colly.Response) {
-		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
-		doc.Find("input").Each(func(i int, s *goquery.Selection) {
-			name, _ := s.Attr("name")
-			if strings.HasSuffix(name, "token") {
-				data[name], _ = s.Attr("value")
-			}
-		})
-	})
-	_ = client.Visit(tempURL)
 	nextURL := fmt.Sprintf("%s://%s/go/%s", u.Scheme, u.Host, id)
 
+	recaptchaV3, err := RecaptchaV3()
+	if err != nil {
+		return "", err
+	}
+	data.Set("x-token", recaptchaV3)
 	for i := 0; i < 2; i++ {
+		time.Sleep(3 * time.Second)
 		log.Default().Println("ouo short-link next URL: ", nextURL)
-		recaptchaV3, err := RecaptchaV3()
+		postReq, err := http.NewRequest(http.MethodPost, nextURL, strings.NewReader(data.Encode()))
+		postReq.Header = http.Header{
+			"accept":          {"*/*"},
+			"accept-language": {"de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
+			"user-agent":      {"Mozilla/5.0 (Macintosh; Intel Mac OS X 12_2_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"},
+			"content-type":    {"application/x-www-form-urlencoded"},
+			//http.HeaderOrderKey: {
+			//	"accept",
+			//	"accept-language",
+			//	"user-agent",
+			//	"content-type",
+			//},
+		}
+		resp, err := client.Do(postReq)
 		if err != nil {
-			return "", err
+			log.Println(err)
 		}
-
-		data["x-token"] = recaptchaV3
-		err = client.Post(nextURL, data)
-		if errors.Is(err, http.ErrUseLastResponse) {
-			return location, nil
+		defer resp.Body.Close()
+		if resp.StatusCode == 302 {
+			location = resp.Header.Get("Location")
+			log.Default().Println("ouo short-link target: ", location)
+			break
+		} else if resp.StatusCode == 403 {
+			return "", errors.New("ouo.io is blocking the request")
 		}
-		//client.OnResponse(func(r *colly.Response) {
-		//	fmt.Println(r.StatusCode)
-		//})
 		nextURL = fmt.Sprintf("%s://%s/xreallcygo/%s", u.Scheme, u.Host, id)
 	}
 	return location, nil
@@ -89,21 +149,29 @@ func RecaptchaV3() (string, error) {
 
 	urlBase += matches[1] + "/"
 	params := matches[2]
-
-	resp, err := http.Get(urlBase + "anchor?" + params)
+	tempUrl := urlBase + "anchor?" + params
+	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger())
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodGet, tempUrl, nil)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", errors.New("recaptcha status code is not 200")
+	}
+	body, _ := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 
 	tokenMatches := regexp.MustCompile(`"recaptcha-token" value="(.*?)"`).FindStringSubmatch(string(body))
 	if len(tokenMatches) < 2 {
-		return "", fmt.Errorf("no token found in response")
+		return "", errors.New("no token found in response")
 	}
 	token := tokenMatches[1]
 	paramsMap := make(map[string]string)
@@ -119,8 +187,9 @@ func RecaptchaV3() (string, error) {
 	postData.Set("k", paramsMap["k"])
 	postData.Set("co", paramsMap["co"])
 	postData.Set("reason", "q")
-
-	resp, err = http.Post(urlBase+"reload?k="+paramsMap["k"], "application/x-www-form-urlencoded", strings.NewReader(postData.Encode()))
+	postReq, err := http.NewRequest(http.MethodPost, urlBase+"reload?k="+paramsMap["k"], strings.NewReader(postData.Encode()))
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err = client.Do(postReq)
 	if err != nil {
 		return "", err
 	}
@@ -133,7 +202,7 @@ func RecaptchaV3() (string, error) {
 
 	answerMatches := regexp.MustCompile(`"rresp","(.*?)"`).FindStringSubmatch(string(body))
 	if len(answerMatches) < 2 {
-		return "", fmt.Errorf("no answer found in response")
+		return "", errors.New("no answer found in reCaptcha response")
 	}
 
 	return answerMatches[1], nil
