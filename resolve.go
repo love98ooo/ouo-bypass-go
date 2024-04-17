@@ -9,7 +9,6 @@ import (
 	"github.com/bogdanfinn/tls-client/profiles"
 	"io"
 	"log"
-	"math/rand"
 	"net/url"
 	"regexp"
 	"strings"
@@ -47,34 +46,24 @@ func OuoBypass(ouoURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	//client.SetRedirectHandler(func(getReq *http.Request, via []*http.Request) error {
-	//	location = getReq.URL.String()
-	//	return http.ErrUseLastResponse
-	//})
-	//extensions.RandomUserAgent(client)
-	//data := make(map[string]string)
-	//client.OnResponse(func(r *colly.Response) {
-	//	log.Default().Println("ouo-bypass-go response code: ", r.StatusCode)
-	//	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
-	//	doc.Find("input").Each(func(i int, s *goquery.Selection) {
-	//		name, _ := s.Attr("name")
-	//		if strings.HasSuffix(name, "token") {
-	//			data[name], _ = s.Attr("value")
-	//		}
-	//	})
-	//})
 
 	getReq, err := http.NewRequest(http.MethodGet, tempURL, nil)
 	if err != nil {
 		return "", err
 	}
 	chrome110UserAgent := []string{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Mobile Safari/537.36", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"}
-	s := rand.NewSource(time.Now().UnixNano())
-	r := rand.New(s)
+	//s := rand.NewSource(time.Now().UnixNano())
+	//r := rand.New(s)
+	const accept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+	const acceptEncoding = "gzip, deflate, br, zstd"
+	const acceptLang = "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
 	getReq.Header = http.Header{
-		"accept":          {"*/*"},
-		"accept-language": {"de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
-		"user-agent":      {chrome110UserAgent[r.Intn(len(chrome110UserAgent))]},
+		"accept":          {accept},
+		"accept-encoding": {acceptEncoding}, // "gzip, deflate, br, zstd
+		"accept-language": {acceptLang},
+		//"user-agent":      {chrome110UserAgent[r.Intn(len(chrome110UserAgent))]},
+		"upgrade-insecure-requests": {"1"},
+		"user-agent":                {chrome110UserAgent[0]},
 		http.HeaderOrderKey: {
 			"accept",
 			"accept-language",
@@ -109,16 +98,12 @@ func OuoBypass(ouoURL string) (string, error) {
 		log.Default().Println("ouo short-link next URL: ", nextURL)
 		postReq, err := http.NewRequest(http.MethodPost, nextURL, strings.NewReader(data.Encode()))
 		postReq.Header = http.Header{
-			"accept":          {"*/*"},
-			"accept-language": {"de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"},
-			"user-agent":      {"Mozilla/5.0 (Macintosh; Intel Mac OS X 12_2_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"},
-			"content-type":    {"application/x-www-form-urlencoded"},
-			//http.HeaderOrderKey: {
-			//	"accept",
-			//	"accept-language",
-			//	"user-agent",
-			//	"content-type",
-			//},
+			"accept":                    {accept},
+			"content-type":              {"application/x-www-form-urlencoded"},
+			"accept-encoding":           {acceptEncoding}, // "gzip, deflate, br, zstd
+			"accept-language":           {acceptLang},
+			"upgrade-insecure-requests": {"1"},
+			"user-agent":                {chrome110UserAgent[0]},
 		}
 		resp, err := client.Do(postReq)
 		if err != nil {
