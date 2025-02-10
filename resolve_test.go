@@ -10,5 +10,7 @@ func TestResolve(t *testing.T) {
 	}
 	if resolve != expected {
 		t.Errorf("Resolve() failed, expected %v, got %v", expected, resolve)
+	} else {
+		t.Logf("Got expected result: %v", resolve)
 	}
 }
