@@ -139,75 +139,60 @@ func OuoBypass(ouoURL string) (string, error) {
 
 // RecaptchaV3 function to bypass reCAPTCHA v3
 func RecaptchaV3() (string, error) {
-	AnchorUrl := "https://www.google.com/recaptcha/api2/anchor?ar=1&k=6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x&co=aHR0cHM6Ly9vdW8ucHJlc3M6NDQz&hl=en&v=pCoGBhjs9s8EhFOHJFe8cqis&size=invisible&cb=ahgyd1gkfkhe"
-	urlBase := "https://www.google.com/recaptcha/"
+	const (
+		recaptchaBase = "https://www.google.com/recaptcha/api2/" // Base URL for reCAPTCHA API
+		anchorParams  = "ar=1&k=6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x&co=aHR0cHM6Ly9vdW8ucHJlc3M6NDQz&hl=en&v=pCoGBhjs9s8EhFOHJFe8cqis&size=invisible&cb=ahgyd1gkfkhe"
+		recaptchaK    = "6Lcr1ncUAAAAAH3cghg6cOTPGARa8adOf-y9zv2x"
+		recaptchaV    = "pCoGBhjs9s8EhFOHJFe8cqis"
+		recaptchaCo   = "aHR0cHM6Ly9vdW8ucHJlc3M6NDQz"
+	)
 
-	matches := regexp.MustCompile(`([api2|enterprise]+)\/anchor\?(.*)`).FindStringSubmatch(AnchorUrl)
-	if len(matches) < 3 {
-		return "", fmt.Errorf("no matches found in ANCHOR_URL")
-	}
+	client, _ := tlsclient.NewHttpClient(tlsclient.NewNoopLogger())
 
-	urlBase += matches[1] + "/"
-	params := matches[2]
-	tempUrl := urlBase + "anchor?" + params
-	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger())
+	anchorURL := recaptchaBase + "anchor?" + anchorParams
+	resp, err := client.Do(mustRequest("GET", anchorURL, nil))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("anchor request failed: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodGet, tempUrl, nil)
-	resp, err := client.Do(req)
+
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	body, _ := io.ReadAll(resp.Body)
+	tokenMatch := regexp.MustCompile(`"recaptcha-token" value="(.*?)"`).FindSubmatch(body)
+	if len(tokenMatch) < 2 {
+		return "", errors.New("token not found in anchor response")
+	}
+
+	postData := url.Values{
+		"v":      {recaptchaV},
+		"c":      {string(tokenMatch[1])},
+		"k":      {recaptchaK},
+		"co":     {recaptchaCo},
+		"reason": {"q"},
+	}
+
+	reloadURL := recaptchaBase + "reload?k=" + recaptchaK
+	resp, err = client.Do(mustRequest("POST", reloadURL, strings.NewReader(postData.Encode())))
 	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", errors.New("recaptcha status code is not 200")
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reload request failed: %w", err)
 	}
 
-	tokenMatches := regexp.MustCompile(`"recaptcha-token" value="(.*?)"`).FindStringSubmatch(string(body))
-	if len(tokenMatches) < 2 {
-		return "", errors.New("no token found in response")
-	}
-	token := tokenMatches[1]
-	paramsMap := make(map[string]string)
-	for _, pair := range strings.Split(params, "&") {
-		parts := strings.Split(pair, "=")
-		if len(parts) == 2 {
-			paramsMap[parts[0]] = parts[1]
-		}
-	}
-	postData := url.Values{}
-	postData.Set("v", paramsMap["v"])
-	postData.Set("c", token)
-	postData.Set("k", paramsMap["k"])
-	postData.Set("co", paramsMap["co"])
-	postData.Set("reason", "q")
-	postReq, err := http.NewRequest(http.MethodPost, urlBase+"reload?k="+paramsMap["k"], strings.NewReader(postData.Encode()))
-	if err != nil {
-		return "", err
-	}
-	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err = client.Do(postReq)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
+	body, _ = io.ReadAll(resp.Body)
+	if answer := regexp.MustCompile(`"rresp","(.*?)"`).FindSubmatch(body); len(answer) > 1 {
+		return string(answer[1]), nil
 	}
+	return "", errors.New("reCAPTCHA solution not found")
+}
 
-	answerMatches := regexp.MustCompile(`"rresp","(.*?)"`).FindStringSubmatch(string(body))
-	if len(answerMatches) < 2 {
-		return "", errors.New("no answer found in reCaptcha response")
-	}
-
-	return answerMatches[1], nil
-
+// mustRequest helper with standardized headers
+func mustRequest(method, url string, body io.Reader) *http.Request {
+	req, _ := http.NewRequest(method, url, body)
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
+	return req
 }
